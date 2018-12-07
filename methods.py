@@ -38,10 +38,10 @@ class MethodLoadException(Exception):
 		self.module_list = lst
 
 class Methods(object):
-	def __init__(self, package_list, configfilename):
-		self.package_list = package_list
+	def __init__(self, method_directories, configfilename):
+		self.method_directories = method_directories
 		self.db = {}
-		for package in self.package_list:
+		for package in self.method_directories:
 			try:
 				package_mod = import_module(package)
 				if not hasattr(package_mod, "__file__"):
@@ -87,8 +87,8 @@ class Methods(object):
 
 # Collect information on methods
 class SubMethods(Methods):
-	def __init__(self, package_list, configfilename, daemon_config):
-		super(SubMethods, self).__init__(package_list, configfilename)
+	def __init__(self, method_directories, configfilename, daemon_config):
+		super(SubMethods, self).__init__(method_directories, configfilename)
 		t0 = time()
 		self.runners = new_runners(daemon_config)
 		per_runner = defaultdict(list)
