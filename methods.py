@@ -41,7 +41,19 @@ class Methods(object):
 	def __init__(self, method_directories, configfilename):
 		self.method_directories = method_directories
 		self.db = {}
-		for package in self.method_directories:
+		db, dirs = self._gather_methods(self.method_directories, configfilename)
+		self.db.update(db)
+		self.method_directories.update(dirs)
+		# build dependency tree for all methods
+		self.deptree = {}
+		for method in self.db:
+			self.deptree[method] = self._build_dep_tree(method, tree={})
+		self.link = {k: v.get('link') for k, v in iteritems(self.db)}
+
+	def _gather_methods(self, method_directories, configfilename):
+		db = {}
+		dirs = set()
+		for package in method_directories:
 			try:
 				package_mod = import_module(package)
 				if not hasattr(package_mod, "__file__"):
@@ -49,20 +61,29 @@ class Methods(object):
 			except ImportError:
 				raise Exception("Failed to import %s, maybe missing __init__.py?" % (package,))
 			confname = os.path.join(os.path.dirname(package_mod.__file__), configfilename)
-			tmp = read_method_conf(confname)
+			tmp, tmpd = parse_method_conf(confname)
 			for x in tmp:
-				if x in self.db:
+				if x in db:
 					print("METHOD:  ERROR, method \"%s\" defined both in \"%s\" and \"%s\"!" % (
-						x, package, self.db[x]['package']))
+						x, package, db[x]['package']))
 					exit(1)
 			for x in tmp.values():
 				x['package'] = os.path.basename(package)
-			self.db.update(tmp)
-		# build dependency tree for all methods
-		self.deptree = {}
-		for method in self.db:
-			self.deptree[method] = self._build_dep_tree(method, tree={})
-		self.link = {k: v.get('link') for k, v in iteritems(self.db)}
+			db.update(tmp)
+			try:
+				assert tmpd
+				nested = set()
+				for d in tmpd:
+					if "%s.%s" % (package, d,) not in self.method_directories:
+						nested.add("%s.%s" % (package, d,))
+				assert nested
+				dirs.update(nested)
+				tmp, tmpd = self._gather_methods(nested, configfilename)
+				db.update(tmp)
+				dirs.update(tmpd)
+			except AssertionError:
+				pass
+		return db, dirs
 
 	def _build_dep_tree(self, method, tree={}):
 		if method not in self.db:
@@ -258,10 +279,10 @@ def options2typing(method, options):
 	# might later.)
 	return sorted(([k[1:], v] for k, v in iteritems(res) if v), key=lambda i: -len(i[0]))
 
-
-def read_method_conf(filename):
+def parse_method_conf(filename):
 	""" read and parse the methods.conf file """
 	db = {}
+	dirs = set()
 	with open(filename) as fh:
 		for lineno, line in enumerate(fh, 1):
 			data = line.split('#')[0].split()
@@ -272,7 +293,10 @@ def read_method_conf(filename):
 				version = data.pop(0)
 			except IndexError:
 				version = 'py'
-			if not version.startswith('py') or data:
+			if version == 'dir':
+				dirs.add(method)
+			elif not version.startswith('py') or data:
 				raise Exception('Trailing garbage on %s:%d: %s' % (filename, lineno, line,))
-			db[method] = DotDict(version=version)
-	return db
+			else:
+				db[method] = DotDict(version=version)
+	return db, dirs
